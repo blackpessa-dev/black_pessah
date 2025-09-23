@@ -16,9 +16,4 @@ services:
       - key: UNIVERSAL_LICENSE_KEY
         value: GHOST-SHELL-UNIVERSAL-2024
       - key: PYTHON_VERSION
-        value: 3.11.7   # ✅ ensures wheels instead of maturin builds
-
-databases:
-  - name: ghostshell-licenses-db
-    databaseName: ghostshell_licenses
-    user: ghostshell_admin
+        value: 3.11.7   # ✅ force a safe version with wheels
