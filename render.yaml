@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: ghostshell-license-server
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ghostshell-licenses-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: UNIVERSAL_LICENSE_KEY
+        value: GHOST-SHELL-UNIVERSAL-2024
+
+databases:
+  - name: ghostshell-licenses-db
+    databaseName: ghostshell_licenses
+    user: ghostshell_admin
