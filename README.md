@@ -64,7 +64,7 @@ This key will work for any GhostShell instance without requiring individual lice
 ### Validate License (Universal Key)
 
 ```bash
-curl -X POST "https://your-license-server.onrender.com/validate" \
+curl -X POST "https://black-pessah.onrender.com/validate" \
   -H "Content-Type: application/json" \
   -d '{
     "license_key": "GHOST-SHELL-UNIVERSAL-2024",
@@ -81,20 +81,21 @@ curl -X POST "https://your-license-server.onrender.com/validate" \
 ### Create New License (Admin)
 
 ```bash
-curl -X POST "https://your-license-server.onrender.com/create" \
+curl -X POST "https://black-pessah.onrender.com/create" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_JWT_SECRET" \
+  -H "Authorization: Bearer $JWT_SECRET" \
   -d '{
     "expires_in_days": 365,
     "max_instances": 1
   }'
+
 ```
 
 ### Get Statistics (Admin)
 
 ```bash
-curl -X GET "https://your-license-server.onrender.com/stats" \
-  -H "Authorization: Bearer YOUR_JWT_SECRET"
+curl -X GET "https://black-pessah.onrender.com/stats" \
+  -H "Authorization: Bearer $env:JWT_SECRET" `
 ```
 
 ## Security Features
