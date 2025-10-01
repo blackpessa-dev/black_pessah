@@ -1,42 +1,87 @@
 import streamlit as st
 import requests
 import json
+import platform
+import uuid
 from datetime import datetime
 
 # Enable Streamlit config for full-screen and clean UI
-st.set_page_config(page_title="GhostShell License Manager", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="GhostShell License Manager", layout="wide")
 
 # API Base URL (matches backend deployment)
 API_URL = 'https://black-pessah.onrender.com'
 
+# Helper function to get system info
+def get_system_info():
+    return {
+        "machine_id": str(uuid.getnode()),  # Use MAC address as machine ID
+        "platform": platform.system(),
+        "arch": platform.machine()
+    }
+
+def activate_license():
+    st.header("Activate License")
+    with st.form(key='activate_form'):
+        license_key = st.text_input("Enter License Key", placeholder="Enter license key")
+        submit_button = st.form_submit_button("Activate License")
+
+        if submit_button:
+            if not license_key:
+                st.error("License Key is required")
+                return
+            system_info = get_system_info()
+            payload = {
+                "license_key": license_key,
+                "fingerprint": {
+                    "machine_id": system_info["machine_id"],
+                    "platform": system_info["platform"],
+                    "arch": system_info["arch"]
+                },
+                "timestamp": datetime.now().isoformat(),
+                "version": "1.0.0"
+            }
+            with st.spinner("Activating..."):
+                try:
+                    response = requests.post(f"{API_URL}/activate",
+                                          headers={"Content-Type": "application/json"},
+                                          data=json.dumps(payload))
+                    response.raise_for_status()
+                    data = response.json()
+                    if data.get("valid"):
+                        st.success(f"Status: Valid\nMessage: {data.get('message')}\nMachine ID: {system_info['machine_id']}")
+                        if data.get("expires_at"):
+                            st.write(f"Expires: {datetime.fromisoformat(data['expires_at']).strftime('%Y-%m-%d %H:%M:%S')}")
+                        if data.get("remaining_validations") is not None:
+                            st.write(f"Remaining Validations: {data['remaining_validations']}")
+                    else:
+                        st.error(f"Status: Invalid\nMessage: {data.get('message')}")
+                except requests.RequestException as e:
+                    st.error(f"Failed to activate license: {str(e)}")
+
 def validate_license():
     st.header("Validate License")
     with st.form(key='validate_form'):
-        license_key = st.text_input("License Key", placeholder="Enter license key")
-        machine_id = st.text_input("Machine ID", placeholder="Enter machine ID")
-        platform = st.text_input("Platform", placeholder="Enter platform")
-        arch = st.text_input("Architecture", placeholder="Enter architecture")
-        timestamp = datetime.now().isoformat()
-        version = "1.0.0"
+        license_key = st.text_input("Enter License Key", placeholder="Enter license key")
         submit_button = st.form_submit_button("Validate License")
 
         if submit_button:
             if not license_key:
                 st.error("License Key is required")
                 return
+            system_info = get_system_info()
             payload = {
                 "license_key": license_key,
                 "fingerprint": {
-                    "machine_id": machine_id,
-                    "platform": platform,
-                    "arch": arch
+                    "machine_id": system_info["machine_id"],
+                    "platform": system_info["platform"],
+                    "arch": system_info["arch"]
                 },
-                "timestamp": timestamp,
-                "version": version
+                "timestamp": datetime.now().isoformat(),
+                "version": "1.0.0"
             }
             with st.spinner("Validating..."):
                 try:
-                    response = requests.post(f"{API_URL}/validate", 
+                    response = requests.post(f"{API_URL}/validate",
                                           headers={"Content-Type": "application/json"},
                                           data=json.dumps(payload))
                     response.raise_for_status()
@@ -52,27 +97,27 @@ def validate_license():
                 except requests.RequestException as e:
                     st.error(f"Failed to validate license: {str(e)}")
 
-def create_license():
-    st.header("Create License (Admin)")
-    with st.form(key='create_form'):
-        admin_token = st.text_input("Admin Token", placeholder="Enter admin token", type="password")
-        license_key = st.text_input("License Key (optional)", placeholder="Leave blank to auto-generate")
+def manage_license():
+    st.header("Manage License")
+    with st.form(key='manage_form'):
+        admin_token = st.text_input("Enter Admin Token", placeholder="Enter admin token", type="password")
+        license_key = st.text_input("Enter License Key", placeholder="Enter license key")
         expires_in_days = st.number_input("Expires In Days", min_value=1, value=365)
         max_instances = st.number_input("Max Instances", min_value=1, value=1)
-        submit_button = st.form_submit_button("Create License")
+        submit_button = st.form_submit_button("Update License")
 
         if submit_button:
-            if not admin_token:
-                st.error("Admin Token is required")
+            if not admin_token or not license_key:
+                st.error("Admin Token and License Key are required")
                 return
             payload = {
-                "licenseKey": license_key,
-                "expiresInDays": expires_in_days,
-                "maxInstances": max_instances
+                "license_key": license_key,
+                "expires_in_days": expires_in_days,
+                "max_instances": max_instances
             }
-            with st.spinner("Creating..."):
+            with st.spinner("Updating..."):
                 try:
-                    response = requests.post(f"{API_URL}/create",
+                    response = requests.put(f"{API_URL}/update",
                                           headers={
                                               "Content-Type": "application/json",
                                               "Authorization": f"Bearer {admin_token}"
@@ -85,38 +130,43 @@ def create_license():
                               f"Max Instances: {data.get('max_instances')}\n"
                               f"Message: {data.get('message')}")
                 except requests.RequestException as e:
-                    st.error(f"Failed to create license: {str(e)}")
+                    st.error(f"Failed to update license: {str(e)}")
 
 def stats():
-    st.header("License Statistics (Admin)")
-    admin_token = st.text_input("Admin Token", placeholder="Enter admin token", type="password")
-    if st.button("Fetch Statistics"):
-        if not admin_token:
-            st.error("Admin Token is required")
-            return
-        with st.spinner("Loading..."):
-            try:
-                response = requests.get(f"{API_URL}/stats",
+    st.header("Statistics")
+    with st.form(key='stats_form'):
+        admin_token = st.text_input("Enter Admin Token", placeholder="Enter admin token", type="password")
+        submit_button = st.form_submit_button("Fetch Statistics")
+
+        if submit_button:
+            if not admin_token:
+                st.error("Admin Token is required")
+                return
+            with st.spinner("Loading..."):
+                try:
+                    response = requests.get(f"{API_URL}/stats",
                                       headers={"Authorization": f"Bearer {admin_token}"})
-                response.raise_for_status()
-                data = response.json()
-                st.success(f"Total Licenses: {data.get('total_licenses')}\n"
-                          f"Active Licenses: {data.get('active_licenses')}\n"
-                          f"Expired Licenses: {data.get('expired_licenses')}\n"
-                          f"Recent Validations (7 days): {data.get('recent_validations')}\n"
-                          f"Universal License Active: {'Yes' if data.get('universal_license_active') else 'No'}")
-            except requests.RequestException as e:
-                st.error(f"Failed to fetch stats: {str(e)}")
+                    response.raise_for_status()
+                    data = response.json()
+                    st.success(f"Total Licenses: {data.get('total_licenses')}\n"
+                              f"Active Licenses: {data.get('active_licenses')}\n"
+                              f"Expired Licenses: {data.get('expired_licenses')}\n"
+                              f"Recent Validations (7 days): {data.get('recent_validations')}\n"
+                              f"Universal License Active: {'Yes' if data.get('universal_license_active') else 'No'}")
+                except requests.RequestException as e:
+                    st.error(f"Failed to fetch stats: {str(e)}")
 
 def main():
     st.title("GhostShell License Manager")
-    page = st.sidebar.selectbox("Navigate", ["Validate License", "Create License", "Statistics"])
+    tabs = st.tabs(["Activate License", "Validate License", "Manage License", "Statistics"])
     
-    if page == "Validate License":
+    with tabs[0]:
+        activate_license()
+    with tabs[1]:
         validate_license()
-    elif page == "Create License":
-        create_license()
-    elif page == "Statistics":
+    with tabs[2]:
+        manage_license()
+    with tabs[3]:
         stats()
 
 if __name__ == "__main__":
