@@ -16,7 +16,8 @@ def get_system_info():
     return {
         "machine_id": str(uuid.getnode()),  # Use MAC address as machine ID
         "platform": platform.system(),
-        "arch": platform.machine()
+        "arch": platform.machine(),
+        "ip": "unknown"  # Placeholder for client IP (Streamlit can't access request headers directly)
     }
 
 def activate_license():
@@ -35,7 +36,8 @@ def activate_license():
                 "fingerprint": {
                     "machine_id": system_info["machine_id"],
                     "platform": system_info["platform"],
-                    "arch": system_info["arch"]
+                    "arch": system_info["arch"],
+                    "ip": system_info["ip"]
                 },
                 "timestamp": datetime.now().isoformat(),
                 "version": "1.0.0"
@@ -68,14 +70,8 @@ def validate_license():
             if not license_key:
                 st.error("License Key is required")
                 return
-            system_info = get_system_info()
             payload = {
                 "license_key": license_key,
-                "fingerprint": {
-                    "machine_id": system_info["machine_id"],
-                    "platform": system_info["platform"],
-                    "arch": system_info["arch"]
-                },
                 "timestamp": datetime.now().isoformat(),
                 "version": "1.0.0"
             }
@@ -97,27 +93,27 @@ def validate_license():
                 except requests.RequestException as e:
                     st.error(f"Failed to validate license: {str(e)}")
 
-def manage_license():
-    st.header("Manage License")
-    with st.form(key='manage_form'):
+def create_license():
+    st.header("Create License")
+    with st.form(key='create_form'):
         admin_token = st.text_input("Enter Admin Token", placeholder="Enter admin token", type="password")
-        license_key = st.text_input("Enter License Key", placeholder="Enter license key")
+        license_key = st.text_input("Enter License Key (optional)", placeholder="Leave blank to auto-generate")
         expires_in_days = st.number_input("Expires In Days", min_value=1, value=365)
         max_instances = st.number_input("Max Instances", min_value=1, value=1)
-        submit_button = st.form_submit_button("Update License")
+        submit_button = st.form_submit_button("Create License")
 
         if submit_button:
-            if not admin_token or not license_key:
-                st.error("Admin Token and License Key are required")
+            if not admin_token:
+                st.error("Admin Token is required")
                 return
             payload = {
-                "license_key": license_key,
-                "expires_in_days": expires_in_days,
-                "max_instances": max_instances
+                "licenseKey": license_key,
+                "expiresInDays": expires_in_days,
+                "maxInstances": max_instances
             }
-            with st.spinner("Updating..."):
+            with st.spinner("Creating..."):
                 try:
-                    response = requests.put(f"{API_URL}/update",
+                    response = requests.post(f"{API_URL}/create",
                                           headers={
                                               "Content-Type": "application/json",
                                               "Authorization": f"Bearer {admin_token}"
@@ -130,7 +126,73 @@ def manage_license():
                               f"Max Instances: {data.get('max_instances')}\n"
                               f"Message: {data.get('message')}")
                 except requests.RequestException as e:
+                    st.error(f"Failed to create license: {str(e)}")
+
+def manage_license():
+    st.header("Manage License")
+    
+    # Update License Form
+    st.subheader("Update License")
+    with st.form(key='update_form'):
+        admin_token_update = st.text_input("Enter Admin Token (Update)", placeholder="Enter admin token", type="password")
+        license_key_update = st.text_input("Enter License Key (Update)", placeholder="Enter license key")
+        expires_in_days = st.number_input("Expires In Days", min_value=1, value=365)
+        max_instances = st.number_input("Max Instances", min_value=1, value=1)
+        submit_button_update = st.form_submit_button("Update License")
+
+        if submit_button_update:
+            if not admin_token_update or not license_key_update:
+                st.error("Admin Token and License Key are required")
+                return
+            payload = {
+                "license_key": license_key_update,
+                "expires_in_days": expires_in_days,
+                "max_instances": max_instances
+            }
+            with st.spinner("Updating..."):
+                try:
+                    response = requests.put(f"{API_URL}/update",
+                                          headers={
+                                              "Content-Type": "application/json",
+                                              "Authorization": f"Bearer {admin_token_update}"
+                                          },
+                                          data=json.dumps(payload))
+                    response.raise_for_status()
+                    data = response.json()
+                    st.success(f"License Key: {data.get('license_key')}\n"
+                              f"Expires: {datetime.fromisoformat(data['expires_at']).strftime('%Y-%m-%d %H:%M:%S')}\n"
+                              f"Max Instances: {data.get('max_instances')}\n"
+                              f"Message: {data.get('message')}")
+                except requests.RequestException as e:
                     st.error(f"Failed to update license: {str(e)}")
+
+    # Delete License Form
+    st.subheader("Delete License")
+    with st.form(key='delete_form'):
+        admin_token_delete = st.text_input("Enter Admin Token (Delete)", placeholder="Enter admin token", type="password")
+        license_key_delete = st.text_input("Enter License Key (Delete)", placeholder="Enter license key")
+        submit_button_delete = st.form_submit_button("Delete License")
+
+        if submit_button_delete:
+            if not admin_token_delete or not license_key_delete:
+                st.error("Admin Token and License Key are required")
+                return
+            payload = {
+                "license_key": license_key_delete
+            }
+            with st.spinner("Deleting..."):
+                try:
+                    response = requests.delete(f"{API_URL}/delete",
+                                            headers={
+                                                "Content-Type": "application/json",
+                                                "Authorization": f"Bearer {admin_token_delete}"
+                                            },
+                                            data=json.dumps(payload))
+                    response.raise_for_status()
+                    data = response.json()
+                    st.success(f"Message: {data.get('message', 'License deleted successfully')}")
+                except requests.RequestException as e:
+                    st.error(f"Failed to delete license: {str(e)}")
 
 def stats():
     st.header("Statistics")
@@ -158,15 +220,17 @@ def stats():
 
 def main():
     st.title("GhostShell License Manager")
-    tabs = st.tabs(["Activate License", "Validate License", "Manage License", "Statistics"])
+    tabs = st.tabs(["Activate License", "Validate License", "Create License", "Manage License", "Statistics"])
     
     with tabs[0]:
         activate_license()
     with tabs[1]:
         validate_license()
     with tabs[2]:
-        manage_license()
+        create_license()
     with tabs[3]:
+        manage_license()
+    with tabs[4]:
         stats()
 
 if __name__ == "__main__":
