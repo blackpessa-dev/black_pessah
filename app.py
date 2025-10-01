@@ -3,7 +3,10 @@ import requests
 import json
 from datetime import datetime
 
-# API Base URL
+# Enable Streamlit config for full-screen and clean UI
+st.set_page_config(page_title="GhostShell License Manager", layout="wide", initial_sidebar_state="expanded")
+
+# API Base URL (matches backend deployment)
 API_URL = 'https://black-pessah.onrender.com'
 
 def validate_license():
