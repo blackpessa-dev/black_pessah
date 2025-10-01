@@ -40,7 +40,7 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Models
+# Models (unchanged)
 class License(Base):
     __tablename__ = "licenses"
     
@@ -77,14 +77,14 @@ class ValidationLog(Base):
 # Create tables
 Base.metadata.create_all(bind=engine)
 
-# FastAPI app
+# FastAPI app (unchanged)
 app = FastAPI(
     title="GhostShell License Server",
     description="Universal license validation server for GhostShell instances",
     version="1.0.0"
 )
 
-# CORS middleware
+# CORS middleware (unchanged)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -93,10 +93,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Security
+# Security (unchanged)
 security = HTTPBearer()
 
-# Pydantic models
+# Pydantic models (unchanged)
 class LicenseValidationRequest(BaseModel):
     license_key: str
     fingerprint: dict
@@ -115,7 +115,7 @@ class CreateLicenseRequest(BaseModel):
     expires_in_days: int = 365
     max_instances: int = 1
 
-# Database dependency
+# Database dependency (unchanged)
 def get_db():
     db = SessionLocal()
     try:
@@ -123,7 +123,7 @@ def get_db():
     finally:
         db.close()
 
-# Utility functions
+# Utility functions (unchanged)
 def generate_license_key() -> str:
     """Generate a new license key"""
     prefix = "GHOST"
@@ -155,8 +155,7 @@ def get_client_ip(request) -> str:
         return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
 
-# API Routes
-
+# API Routes (unchanged - all the @app.post, @app.get, etc. remain the same as in your original)
 @app.get("/")
 async def root():
     return {
@@ -432,5 +431,5 @@ async def get_stats(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 5000))  # Use $PORT from Render
     uvicorn.run(app, host="0.0.0.0", port=port)
