@@ -1,22 +1,7 @@
-[project]
-name = "ghostshell-license-server"
-version = "0.1.0"
-description = "License server built with FastAPI and PostgreSQL"
-requires-python = ">=3.11,<3.12"
-dependencies = [
-    "fastapi==0.117.1",
-    "psycopg2-binary==2.9.10",
-    "pydantic==2.11.9",
-    "pydantic-core==2.14.6",  # Pinned to avoid maturin build
-    "pyjwt==2.10.1",
-    "python-dotenv==1.1.1",
-    "python-jose[cryptography]==3.5.0",
-    "python-multipart==0.0.20",
-    "sqlalchemy==2.0.43",
-    "uvicorn[standard]==0.36.0",
-    "h11==0.14.0"
-]
-
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = []  # Disable package discovery
+py-modules = []  # No modules to include
