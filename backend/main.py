@@ -40,7 +40,7 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Models (unchanged)
+# Models
 class License(Base):
     __tablename__ = "licenses"
     
@@ -68,23 +68,23 @@ class ValidationLog(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     license_key = Column(String, index=True)
-    machine_fingerprint = Column(String)
+    machine_fingerprint = Column(String, nullable=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
     ip_address = Column(String, nullable=True)
     user_agent = Column(String, nullable=True)
-    validation_result = Column(String)  # success, expired, invalid, etc.
+    validation_result = Column(String)
 
 # Create tables
 Base.metadata.create_all(bind=engine)
 
-# FastAPI app (unchanged)
+# FastAPI app
 app = FastAPI(
     title="GhostShell License Server",
     description="Universal license validation server for GhostShell instances",
     version="1.0.0"
 )
 
-# CORS middleware (unchanged)
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -93,13 +93,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Security (unchanged)
+# Security
 security = HTTPBearer()
 
-# Pydantic models (unchanged)
+# Pydantic models
 class LicenseValidationRequest(BaseModel):
     license_key: str
-    fingerprint: dict
+    fingerprint: Optional[dict] = None
     timestamp: str
     version: str
     signature: Optional[str] = None
@@ -115,7 +115,15 @@ class CreateLicenseRequest(BaseModel):
     expires_in_days: int = 365
     max_instances: int = 1
 
-# Database dependency (unchanged)
+class UpdateLicenseRequest(BaseModel):
+    license_key: str
+    expires_in_days: int
+    max_instances: int
+
+class DeleteLicenseRequest(BaseModel):
+    license_key: str
+
+# Database dependency
 def get_db():
     db = SessionLocal()
     try:
@@ -123,7 +131,7 @@ def get_db():
     finally:
         db.close()
 
-# Utility functions (unchanged)
+# Utility functions
 def generate_license_key() -> str:
     """Generate a new license key"""
     prefix = "GHOST"
@@ -132,7 +140,7 @@ def generate_license_key() -> str:
 
 def hash_fingerprint(fingerprint: dict) -> str:
     """Create a hash of the machine fingerprint"""
-    fingerprint_str = f"{fingerprint.get('machine_id', '')}-{fingerprint.get('platform', '')}-{fingerprint.get('arch', '')}"
+    fingerprint_str = f"{fingerprint.get('machine_id', '')}-{fingerprint.get('platform', '')}-{fingerprint.get('arch', '')}-{fingerprint.get('ip', '')}"
     return hashlib.sha256(fingerprint_str.encode()).hexdigest()
 
 def is_universal_license(license_key: str) -> bool:
@@ -155,7 +163,7 @@ def get_client_ip(request) -> str:
         return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
 
-# API Routes (unchanged - all the @app.post, @app.get, etc. remain the same as in your original)
+# API Routes
 @app.get("/")
 async def root():
     return {
@@ -174,7 +182,7 @@ async def validate_license(
     db: Session = Depends(get_db),
     http_request: Request = None
 ):
-    """Validate a license key"""
+    """Validate a license key without requiring fingerprint"""
     try:
         logger.info(f"License validation request for: {request.license_key}")
         
@@ -182,7 +190,6 @@ async def validate_license(
         if request.signature:
             request_dict = {
                 "license_key": request.license_key,
-                "fingerprint": request.fingerprint,
                 "timestamp": request.timestamp,
                 "version": request.version
             }
@@ -200,7 +207,7 @@ async def validate_license(
             # Log the validation
             log_entry = ValidationLog(
                 license_key=request.license_key,
-                machine_fingerprint=hash_fingerprint(request.fingerprint),
+                machine_fingerprint=None,
                 validation_result="success_universal",
                 ip_address=get_client_ip(http_request) if http_request else None,
                 user_agent=http_request.headers.get("User-Agent") if http_request else None
@@ -222,6 +229,150 @@ async def validate_license(
             logger.warning(f"License not found: {request.license_key}")
             
             # Log failed validation
+            log_entry = ValidationLog(
+                license_key=request.license_key,
+                machine_fingerprint=None,
+                validation_result="not_found",
+                ip_address=get_client_ip(http_request) if http_request else None,
+                user_agent=http_request.headers.get("User-Agent") if http_request else None
+            )
+            db.add(log_entry)
+            db.commit()
+            
+            return LicenseValidationResponse(
+                valid=False,
+                message="License key not found"
+            )
+        
+        # Check if license is active
+        if not license_record.is_active:
+            logger.warning(f"License deactivated: {request.license_key}")
+            
+            log_entry = ValidationLog(
+                license_key=request.license_key,
+                machine_fingerprint=None,
+                validation_result="deactivated",
+                ip_address=get_client_ip(http_request) if http_request else None,
+                user_agent=http_request.headers.get("User-Agent") if http_request else None
+            )
+            db.add(log_entry)
+            db.commit()
+            
+            return LicenseValidationResponse(
+                valid=False,
+                message="License has been deactivated"
+            )
+        
+        # Check expiration
+        if license_record.expires_at and license_record.expires_at < datetime.utcnow():
+            logger.warning(f"License expired: {request.license_key}")
+            
+            log_entry = ValidationLog(
+                license_key=request.license_key,
+                machine_fingerprint=None,
+                validation_result="expired",
+                ip_address=get_client_ip(http_request) if http_request else None,
+                user_agent=http_request.headers.get("User-Agent") if http_request else None
+            )
+            db.add(log_entry)
+            db.commit()
+            
+            return LicenseValidationResponse(
+                valid=False,
+                message="License has expired",
+                expires_at=license_record.expires_at.isoformat()
+            )
+        
+        # Update validation info
+        license_record.last_validation = datetime.utcnow()
+        license_record.validation_count += 1
+        
+        # Log successful validation
+        log_entry = ValidationLog(
+            license_key=request.license_key,
+            machine_fingerprint=None,
+            validation_result="success",
+            ip_address=get_client_ip(http_request) if http_request else None,
+            user_agent=http_request.headers.get("User-Agent") if http_request else None
+        )
+        db.add(log_entry)
+        db.commit()
+        
+        logger.info(f"License validated successfully: {request.license_key}")
+        
+        return LicenseValidationResponse(
+            valid=True,
+            expires_at=license_record.expires_at.isoformat() if license_record.expires_at else None,
+            message="License validated successfully",
+            remaining_validations=max(0, 10000 - license_record.validation_count)
+        )
+        
+    except Exception as e:
+        logger.error(f"Error validating license: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/activate", response_model=LicenseValidationResponse)
+async def activate_license(
+    request: LicenseValidationRequest,
+    db: Session = Depends(get_db),
+    http_request: Request = None
+):
+    """Activate a license key and bind to machine fingerprint"""
+    try:
+        logger.info(f"License activation request for: {request.license_key}")
+        
+        # Fingerprint is required for activation
+        if not request.fingerprint:
+            logger.warning(f"Missing fingerprint for activation: {request.license_key}")
+            return LicenseValidationResponse(
+                valid=False,
+                message="Machine fingerprint required for activation"
+            )
+        
+        # Verify JWT signature if provided
+        if request.signature:
+            request_dict = {
+                "license_key": request.license_key,
+                "fingerprint": request.fingerprint,
+                "timestamp": request.timestamp,
+                "version": request.version
+            }
+            if not verify_jwt_signature(request_dict, request.signature):
+                logger.warning(f"Invalid JWT signature for license: {request.license_key}")
+                return LicenseValidationResponse(
+                    valid=False,
+                    message="Invalid signature"
+                )
+        
+        # Check for universal license
+        if is_universal_license(request.license_key):
+            logger.info(f"Universal license activated successfully")
+            
+            # Log the activation
+            log_entry = ValidationLog(
+                license_key=request.license_key,
+                machine_fingerprint=hash_fingerprint(request.fingerprint),
+                validation_result="success_universal",
+                ip_address=get_client_ip(http_request) if http_request else None,
+                user_agent=http_request.headers.get("User-Agent") if http_request else None
+            )
+            db.add(log_entry)
+            db.commit()
+            
+            return LicenseValidationResponse(
+                valid=True,
+                expires_at=(datetime.utcnow() + timedelta(days=365)).isoformat(),
+                message="Universal license activated successfully",
+                remaining_validations=999999
+            )
+        
+        # Check regular license in database
+        license_record = db.query(License).filter(License.license_key == request.license_key).first()
+        
+        if not license_record:
+            logger.warning(f"License not found: {request.license_key}")
+            
+            # Log failed activation
             log_entry = ValidationLog(
                 license_key=request.license_key,
                 machine_fingerprint=hash_fingerprint(request.fingerprint),
@@ -328,7 +479,7 @@ async def validate_license(
         license_record.last_validation = datetime.utcnow()
         license_record.validation_count += 1
         
-        # Log successful validation
+        # Log successful activation
         log_entry = ValidationLog(
             license_key=request.license_key,
             machine_fingerprint=current_fingerprint,
@@ -339,17 +490,17 @@ async def validate_license(
         db.add(log_entry)
         db.commit()
         
-        logger.info(f"License validated successfully: {request.license_key}")
+        logger.info(f"License activated successfully: {request.license_key}")
         
         return LicenseValidationResponse(
             valid=True,
             expires_at=license_record.expires_at.isoformat() if license_record.expires_at else None,
-            message="License validated successfully",
+            message="License activated successfully",
             remaining_validations=max(0, 10000 - license_record.validation_count)
         )
         
     except Exception as e:
-        logger.error(f"Error validating license: {str(e)}")
+        logger.error(f"Error activating license: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/create")
@@ -395,6 +546,75 @@ async def create_license(
         
     except Exception as e:
         logger.error(f"Error creating license: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.put("/update")
+async def update_license(
+    request: UpdateLicenseRequest,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Update an existing license (admin only)"""
+    
+    # Admin token check
+    if credentials.credentials != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    try:
+        license_record = db.query(License).filter(License.license_key == request.license_key).first()
+        
+        if not license_record:
+            raise HTTPException(status_code=404, detail="License key not found")
+        
+        # Update license
+        license_record.expires_at = datetime.utcnow() + timedelta(days=request.expires_in_days)
+        license_record.max_instances = request.max_instances
+        db.commit()
+        
+        logger.info(f"License updated: {request.license_key}")
+        
+        return {
+            "license_key": request.license_key,
+            "expires_at": license_record.expires_at.isoformat(),
+            "max_instances": request.max_instances,
+            "message": "License updated successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error updating license: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.delete("/delete")
+async def delete_license(
+    request: DeleteLicenseRequest,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Delete a license (admin only)"""
+    
+    # Admin token check
+    if credentials.credentials != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    try:
+        license_record = db.query(License).filter(License.license_key == request.license_key).first()
+        
+        if not license_record:
+            raise HTTPException(status_code=404, detail="License key not found")
+        
+        # Mark license as inactive instead of deleting (soft delete)
+        license_record.is_active = False
+        db.query(LicenseBinding).filter(LicenseBinding.license_key == request.license_key).update({"is_active": False})
+        db.commit()
+        
+        logger.info(f"License deleted: {request.license_key}")
+        
+        return {
+            "message": "License deleted successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error deleting license: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/stats")
